@@ -2,88 +2,54 @@
 
 namespace App\Services;
 
-use App\Models\Company;
-
 use App\Models\Product;
-
-use Ramsey\Uuid\Rfc4122\UuidV4;
-use Illuminate\Pagination\LengthAwarePaginator;
+use App\Support\Money;
 
 class ProductService
 {
-
-
-    public static function make()
+    /** @param  array<string, mixed>  $data */
+    public function create(array $data): Product
     {
-        return new self();
-    }
-    public function index($relations = [], $count = [], $params = ['*'], $paginate = 10, $search = null): LengthAwarePaginator
-    {
-        if ($paginate > 50) {
-            $paginate = 50;
-        }
-
-        $query = Product::with($relations)
-            ->select($params)
-            ->withCount($count);
-
-        if ($search) {
-            $query->where('name', 'LIKE', '%' . $search . '%');
-        }
-
-        return $query->paginate($paginate);
-    }
-    public function find($id, $params = ['*'], $relations = [], $count = [])
-    {
-
-        return findByid(Product::class, $id, $relations, $params, $count);
-    }
-    public function create()
-    {
-
-        return view('product.create');
-    }
-
-    public function store($request)
-    {
-
-        $product = Product::create([
-            'company_id' => $request->company_id,
-            'name' => $request->product_name,
-            'quantity' => $request->quantity,
-            'free_items' => (int) ($request->free_items ?? 0),
-            'vat' => $request->vat,
-            'price' => $request->price,
-            'date_of_create' => $request->date_of_create,
-            'apply_company_discount' => $request->boolean('apply_company_discount'),
-        ]);
+        $product = new Product;
+        $this->fill($product, $data);
+        $product->stock_quantity = (int) ($data['stock_quantity'] ?? 0);
+        $product->save();
 
         return $product;
     }
 
-    public function update($id, $request)
+    /**
+     * Stock is not edited here: after creation it only moves through
+     * invoices and credit notes (see InventoryService).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function update(Product $product, array $data): Product
     {
-
-        $product = $this->find($id, ['*']);
-
-        $product->update([
-            'company_id' => $request->company_id,
-            'name' => $request->product_name,
-            'quantity' => $request->quantity,
-            'free_items' => (int) ($request->free_items ?? 0),
-            'vat' => $request->vat,
-            'price' => $request->price,
-            'date_of_create' => $request->date_of_create,
-            'apply_company_discount' => $request->boolean('apply_company_discount'),
-        ]);
+        $this->fill($product, $data);
+        $product->save();
 
         return $product;
     }
 
-    public function delete($id)
+    /**
+     * Invoice and credit note lines keep their own description and prices,
+     * so deleting a product never changes an issued document.
+     */
+    public function delete(Product $product): void
     {
-        $product = $this->find($id, ['*']);
         $product->delete();
-        return $product;
+    }
+
+    /** @param  array<string, mixed>  $data */
+    private function fill(Product $product, array $data): void
+    {
+        $product->fill([
+            'name' => $data['name'],
+            'sku' => $data['sku'] ?? null,
+            'vat_rate' => $data['vat_rate'],
+            'apply_customer_discount' => (bool) ($data['apply_customer_discount'] ?? false),
+        ]);
+        $product->unit_price = Money::of($data['unit_price']);
     }
 }

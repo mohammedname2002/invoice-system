@@ -3,77 +3,26 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class ProductRequest extends FormRequest
 {
-    /**
-     * Determine if the user is authorized to make this request.
-     *
-     * @return bool
-     */
-    public function authorize()
-    {
-        return true;
-    }
-
-    /**
-     * Get the validation rules that apply to the request.
-     *
-     * @return array<string, mixed>
-     */
-    public function rules()
+    /** @return array<string, mixed> */
+    public function rules(): array
     {
         return [
-            'company_id' => 'required|integer|exists:companies,id',
-            'product_name' => 'required|string|max:1000|min:3',
-            'price' => 'required|numeric|min:0|max:100000',
-            'quantity' => 'required|integer|min:0|max:100000',
-            'free_items' => 'nullable|integer|min:0|max:100000',
-            'vat' => 'required|numeric|min:0|max:100',
-            'date_of_create' => 'required|date',
-            'apply_company_discount' => 'nullable|boolean',
+            'name' => ['required', 'string', 'min:2', 'max:255'],
+            'sku' => ['nullable', 'string', 'max:64', Rule::unique('products', 'sku')->ignore($this->route('product'))],
+            'unit_price' => ['required', 'numeric', 'decimal:0,2', 'min:0', 'max:10000000'],
+            'vat_rate' => ['required', 'numeric', 'decimal:0,2', 'min:0', 'max:100'],
+            'apply_customer_discount' => ['boolean'],
+            // Opening stock only; afterwards stock moves through invoices and credit notes.
+            'stock_quantity' => [Rule::excludeIf($this->route('product') !== null), 'nullable', 'integer', 'min:0', 'max:1000000'],
         ];
     }
 
-
-    public function messages()
+    protected function prepareForValidation(): void
     {
-        return [
-            // Product Name
-            'product_name.required' => 'The product name is required.',
-            'product_name.max' => 'The product name must not exceed 1000 characters.',
-            'product_name.min' => 'The product name must be at least 3 characters.',
-            'product_name.string' => 'The product name must be a valid text string.',
-
-            // Price
-            'price.required' => 'The price is required.',
-            'price.max' => 'The price may not exceed 100,000.',
-            'price.min' => 'The price cannot be negative.',
-            'price.numeric' => 'The price must be a valid number.',
-            // Price
-            'quantity.required' => 'The quantity is required.',
-            'quantity.integer' => 'The quantity must be a whole number.',
-            'quantity.max' => 'The quantity may not exceed 100,000.',
-            'quantity.min' => 'The quantity must be at least 0.',
-
-            // VAT
-            'vat.required' => 'The VAT is required.',
-            'vat.max' => 'The VAT may not exceed 100%.',
-            'vat.min' => 'The VAT cannot be negative.',
-            'vat.numeric' => 'The VAT must be a valid number.',
-
-            // Date of Create
-            'date_of_create.required' => 'The date of create is required.',
-            'date_of_create.date' => 'The date of create must be a valid date format.',
-
-            // Company
-            'company_id.required' => 'Please select a company.',
-            'company_id.exists' => 'The selected company is invalid.',
-
-            // Free Items
-            'free_items.integer' => 'Free items must be a whole number.',
-            'free_items.min' => 'Free items cannot be negative.',
-            'free_items.max' => 'Free items may not exceed 100,000.',
-        ];
+        $this->merge(['apply_customer_discount' => $this->boolean('apply_customer_discount')]);
     }
 }

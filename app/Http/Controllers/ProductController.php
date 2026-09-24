@@ -2,106 +2,59 @@
 
 namespace App\Http\Controllers;
 
-use Dompdf\Dompdf;
-use App\Models\Company;
-use App\Models\Product;
-use Barryvdh\DomPDF\PDF;
-use Illuminate\Http\Request;
-use App\Services\CompanyService;
-use App\Services\ProductService;
-
 use App\Http\Requests\ProductRequest;
-use App\Http\Requests\UpdateProductRequest;
+use App\Models\Product;
+use App\Services\ProductService;
+use App\Support\Money;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\View\View;
 
 class ProductController extends Controller
 {
-    protected $productService;
-    protected $companyService;
+    public function __construct(private readonly ProductService $products) {}
 
-    public function __construct(ProductService $productService, CompanyService $companyService)
+    public function index(): View
     {
-        $this->productService = $productService;
-        $this->companyService = $companyService;
+        return view('products.index');
     }
 
-    public function index()
+    public function create(): View
     {
-        $paginate = request()->paginate ?? 10;
-        $products = $this->productService->index([], [], ['*'], $paginate);
-        $companies = $this->companyService->index([], [], ['*'], $paginate);
-        return view('product.index', [
-            'products' => $products,
-            'companies' => $companies,
-
+        $product = new Product([
+            'vat_rate' => config('invoicing.default_vat_rate'),
+            'apply_customer_discount' => true,
         ]);
+        $product->unit_price = Money::zero();
+
+        return view('products.create', ['product' => $product]);
     }
 
-    /**
-     * Show the form for creating a new resource.
-     *
-     * @return \Illuminate\Http\Response
-     */
-    public function create()
+    public function store(ProductRequest $request): RedirectResponse
     {
+        $product = $this->products->create($request->validated());
 
-        $companies = Company::all();
-
-        return view(
-            'product.create',
-            ['companies' => $companies]
-        );
+        return to_route('products.index')->with('status', "Product {$product->name} created.");
     }
 
-    /**
-     * Store a newly created resource in storage.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\Response
-     */
-    public function store(ProductRequest $request)
+    public function edit(Product $product): View
     {
-        $this->productService->store($request);
-        return redirect()->route('product.index')->with('success', 'Added Sccesfully ');
-    }
-
-
-    public function edit($id)
-    {
-        $product = $this->productService->find($id, ['*']);
-        $companies = Company::all();
-
-        return view('product.edit', [
+        return view('products.edit', [
             'product' => $product,
-            'companies' => $companies
+            'movements' => $product->inventoryMovements()->latest('id')->limit(10)->get(),
         ]);
     }
 
-    /**
-     * Update the specified resource in storage.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \App\Models\Product  $product
-     * @return \Illuminate\Http\Response
-     */
-    public function update($id, UpdateProductRequest $request){
-
-        $this->productService->update($id, $request);
-
-        return redirect()->route('product.index')->with('success', 'Edited Sccesfully ');
-    }
-
-    /**
-     * Remove the specified resource from storage.
-     *
-     * @param  \App\Models\Product  $product
-     * @return \Illuminate\Http\Response
-     */
-    public function destroy($id)
+    public function update(ProductRequest $request, Product $product): RedirectResponse
     {
-        $product = $this->productService->delete($id);
-        return redirect()->back()->with('success', 'Deleted Successfully');
+        $this->products->update($product, $request->validated());
+
+        return to_route('products.index')->with('status', 'Product updated.');
     }
 
+    public function destroy(Product $product): RedirectResponse
+    {
+        $this->products->delete($product);
 
-
+        return to_route('products.index')->with('status', 'Product deleted.');
+    }
 }

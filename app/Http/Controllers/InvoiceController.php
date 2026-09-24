@@ -2,246 +2,119 @@
 
 namespace App\Http\Controllers;
 
-use Mpdf\Mpdf;
-use Dompdf\Dompdf;
-use App\Models\Company;
+use App\Enums\PaymentMethod;
+use App\Http\Requests\InvoiceRequest;
+use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Product;
-use Barryvdh\DomPDF\PDF;
-use Illuminate\Http\Request;
-
-use App\Services\CompanyService;
 use App\Services\InvoiceService;
-use App\Http\Requests\InvoiceRequest;
-use Barryvdh\Snappy\Facades\SnappyPdf;
-use App\Http\Requests\UpdateInvoiceRequest;
-use Log;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Carbon;
+use Illuminate\View\View;
 
 class InvoiceController extends Controller
 {
-    protected $invoiceService;
-    protected $companyService;
+    public function __construct(private readonly InvoiceService $invoices) {}
 
-    public function __construct(InvoiceService $invoiceService, CompanyService $companyService)
+    public function index(): View
     {
-        $this->invoiceService = $invoiceService;
-        $this->companyService = $companyService;
+        return view('invoices.index');
     }
 
-    public function index()
+    public function create(Request $request): View
     {
-        $paginate = request()->paginate ?? 10;
-        $invoices = $this->invoiceService->index([], [], ['*'], $paginate);
-        $companies = Company::orderBy('name')->get();
-
-        $years = Invoice::query()
-            ->selectRaw('YEAR(`from`) as year')
-            ->distinct()
-            ->orderByDesc('year')
-            ->pluck('year');
-
-        if ($years->isEmpty()) {
-            $years = collect([(int) date('Y')]);
-        }
-
-        return view('invoice.index', [
-            'invoices' => $invoices,
-            'companies' => $companies,
-            'years' => $years,
+        $invoice = new Invoice([
+            'issue_date' => Carbon::today(),
+            'customer_id' => $request->integer('customer') ?: null,
         ]);
+
+        return view('invoices.create', $this->formData($invoice));
     }
 
-    /**
-     * Show the form for creating a new resource.
-     *
-     * @return \Illuminate\Http\Response
-     */
-    public function create()
+    public function store(InvoiceRequest $request): RedirectResponse
     {
-        $companies = $this->invoiceService->create();
+        $invoice = $this->invoices->create($request->validated());
 
-        return view(
-            'invoice.create',
-            ['companies' => $companies]
-        );
+        return to_route('invoices.show', $invoice)->with('status', "Invoice {$invoice->number} created.");
     }
 
-    /**
-     * Store a newly created resource in storage.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\Response
-     */
-    public function store(InvoiceRequest $request)
+    public function show(Invoice $invoice): View
     {
-        $this->invoiceService->store($request);
-        return redirect()->route('invoice.index')->with('success', 'Added Sccesfully ');
-    }
+        $invoice->load(['customer', 'items', 'payments.recorder', 'creditNotes']);
 
-
-    public function edit($id)
-    {
-        $invoice = $this->invoiceService->find($id, ['*']);
-        $companies = Company::all();
-
-        return view('invoice.edit', [
+        return view('invoices.show', [
             'invoice' => $invoice,
-            'companies' => $companies
+            'paymentMethods' => PaymentMethod::cases(),
         ]);
     }
 
-    /**
-     * Update the specified resource in storage.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \App\Models\Invoice  $invoice
-     * @return \Illuminate\Http\Response
-     */
-    public function update($id, InvoiceRequest $request)
+    public function edit(Invoice $invoice): View|RedirectResponse
     {
-
-        $this->invoiceService->update($id, $request);
-
-        return redirect()->route('invoice.index')->with('success', 'Edited Sccesfully ');
-    }
-
-    /**
-     * Remove the specified resource from storage.
-     *
-     * @param  \App\Models\Invoice  $invoice
-     * @return \Illuminate\Http\Response
-     */
-    public function destroy($id)
-    {
-        $invoice = $this->invoiceService->delete($id);
-        return redirect()->back()->with('success', 'Deleted Successfully');
-    }
-
-    public function show($id)
-
-            {
-
-
-            $products  = $this->invoiceService->show($id);
-            $invoiceName = Invoice::where('id' , $id)->with(['company'])->first();
-        // Fetch all products that belong to this invoice's company
-        // $products  = Product::where('company_id', $invoiceName->company->id)->get();
-
-        $totalWithVatAndDiscount = $products->sum(function ($product) {
-            return $product->getPriceWithVatAndDiscount();
-        });
-        $totalWithVat = $products->sum(function ($product) {
-            return $product->getPriceWithVat(); // Assuming this method is defined to calculate price with VAT
-        });
-
-
-        $totalTotal = $products->sum(function ($product) use ($invoiceName) {
-            $companyDisc = (float) ($invoiceName->company->discount ?? 0);
-            $productPriceWithDiscont = $product->linePriceAfterDiscount($companyDisc);
-
-            return $productPriceWithDiscont + ($productPriceWithDiscont * $product->vat / 100);
-        });
-
-return  view('invoice.show', [
-            'products'=>$products
-          , 'invoiceName'=>$invoiceName
-         ,'totalWithVat'=>$totalWithVat
-            ,'totalWithVatAndDiscount'=>$totalWithVatAndDiscount
-            ,'totalTotal'=>$totalTotal
-            ,'multiPagePrint' => request()->boolean('multi_print'),
-      ]);
-    }
-
-
-    public function printByCompany(Request $request, $companyId)
-    {
-        $month = $request->filled('month') ? (int) $request->month : null;
-        $year = $request->filled('year') ? (int) $request->year : null;
-
-        $companyIdInt = ($companyId === 'all') ? null : (int) $companyId;
-
-        $data = $this->invoiceService->getCompanyInvoicesPrintData($companyIdInt, $month, $year);
-
-        if (empty($data['invoices'])) {
-            return redirect()
-                ->route('invoice.index')
-                ->with('error', 'No invoices found for the selected filters.');
+        if ($invoice->isLocked()) {
+            return to_route('invoices.show', $invoice)
+                ->withErrors(['invoice' => 'This invoice has payments or credit notes and can no longer be edited. Issue a credit note instead.']);
         }
 
-        return view('invoice.print-by-company', $data);
+        return view('invoices.edit', $this->formData($invoice->load('items')));
     }
 
-    public function downloadInvoice($id)
+    public function update(InvoiceRequest $request, Invoice $invoice): RedirectResponse
     {
-        \Log::info("Download Invoice Process Started");
+        $this->invoices->update($invoice, $request->validated());
 
-        $products = $this->invoiceService->show($id);
-        $invoiceName = Invoice::where('id', $id)->with(['company'])->first();
-
-        $totalWithVatAndDiscount = $products->sum(function ($product) {
-            return $product->getPriceWithVatAndDiscount();
-        });
-        $totalWithVat = $products->sum(function ($product) {
-            return $product->getPriceWithVat(); // Assuming this method is defined to calculate price with VAT
-        });
-
-        // Same grand total formula used by the preview page (invoice.show)
-        $totalTotal = $products->sum(function ($product) use ($invoiceName) {
-            $companyDisc = (float) ($invoiceName->company->discount ?? 0);
-            $productPriceWithDiscont = $product->linePriceAfterDiscount($companyDisc);
-
-            return $productPriceWithDiscont + ($productPriceWithDiscont * $product->vat / 100);
-        });
-
-        $html = view('invoice.download', [
-            'products' => $products,
-            'invoiceName' => $invoiceName,
-            'totalWithVat' => $totalWithVat,
-            'totalWithVatAndDiscount' => $totalWithVatAndDiscount,
-            'totalTotal' => $totalTotal,
-        ])->render();
-
-        // Check if HTML is generated correctly
-        \Log::info("HTML content generated");
-
-        // Initialize mPDF so the output matches the browser print of the
-        // preview page: US Letter, ~10mm page margins plus the 24px card
-        // offset, and the same Roboto font the preview is rendered with.
-        try {
-            $defaultConfig = (new \Mpdf\Config\ConfigVariables())->getDefaults();
-            $fontData = (new \Mpdf\Config\FontVariables())->getDefaults()['fontdata'];
-
-            $mpdf = new \Mpdf\Mpdf([
-                'mode' => 'utf-8',
-                'format' => 'Letter',
-                'margin_left' => 16.4,
-                'margin_right' => 16.14,
-                'margin_top' => 10.05,
-                'margin_bottom' => 10.05,
-                'fontDir' => array_merge($defaultConfig['fontDir'], [storage_path('fonts')]),
-                'fontdata' => $fontData + [
-                    'roboto' => [
-                        'R' => 'Roboto-Regular.ttf',
-                        'B' => 'Roboto-Bold.ttf',
-                    ],
-                ],
-                'default_font' => 'roboto',
-                'tempDir' => storage_path('app/mpdf'),
-            ]);
-            $mpdf->showImageErrors = false;
-            $mpdf->shrink_tables_to_fit = 1;
-            $mpdf->WriteHTML($html);
-
-            \Log::info("PDF generated and download triggered.");
-
-            return response($mpdf->Output('', \Mpdf\Output\Destination::STRING_RETURN), 200, [
-                'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="invoice_' . $invoiceName->id . '.pdf"',
-            ]);
-        } catch (\Mpdf\MpdfException $e) {
-            \Log::error('mPDF Error: ' . $e->getMessage());
-            return response()->json(['error' => 'PDF generation failed!'], 500);
-        }
+        return to_route('invoices.show', $invoice)->with('status', 'Invoice updated.');
     }
 
+    public function destroy(Invoice $invoice): RedirectResponse
+    {
+        $this->invoices->delete($invoice);
+
+        return to_route('invoices.index')->with('status', "Invoice {$invoice->number} deleted.");
+    }
+
+    public function pdf(Invoice $invoice): Response
+    {
+        $invoice->load(['customer', 'items']);
+
+        return Pdf::loadView('pdf.invoice', ['invoice' => $invoice])
+            ->setPaper('a4')
+            ->download("{$invoice->number}.pdf");
+    }
+
+    /**
+     * Data for the line editor: customers, a JSON-friendly product catalogue
+     * and the rows to start with (old input after a validation error wins).
+     *
+     * @return array<string, mixed>
+     */
+    private function formData(Invoice $invoice): array
+    {
+        $rows = old('items', $invoice->exists
+            ? $invoice->items->map(fn ($item) => [
+                'product_id' => $item->product_id,
+                'description' => $item->description,
+                'quantity' => $item->quantity,
+                'free_quantity' => $item->free_quantity,
+                'unit_price' => $item->unit_price->toDecimal(),
+                'vat_rate' => $item->vat_rate,
+            ])->all()
+            : []);
+
+        return [
+            'invoice' => $invoice,
+            'customers' => Customer::orderBy('name')->get(['id', 'name', 'discount_rate']),
+            'products' => Product::orderBy('name')->get()->map(fn (Product $product) => [
+                'id' => $product->id,
+                'name' => $product->name,
+                'unit_price' => $product->unit_price->toDecimal(),
+                'vat_rate' => $product->vat_rate,
+                'apply_customer_discount' => $product->apply_customer_discount,
+            ]),
+            'rows' => array_values($rows),
+            'defaultVatRate' => config('invoicing.default_vat_rate'),
+        ];
+    }
 }

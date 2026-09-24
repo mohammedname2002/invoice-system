@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\InventoryMovementType;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -9,21 +10,24 @@ class InventoryMovement extends Model
 {
     protected $fillable = [
         'product_id',
+        'type',
+        'quantity',
+        'invoice_id',
         'credit_note_id',
-        'credit_note_item_id',
-        'movement_type',
-        'quantity_paid_delta',
-        'quantity_free_delta',
         'note',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            'type' => InventoryMovementType::class,
+            'quantity' => 'integer',
+        ];
+    }
+
+    /** @return BelongsTo<Product, $this> */
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
-    }
-
-    public function creditNote(): BelongsTo
-    {
-        return $this->belongsTo(CreditNote::class);
     }
 }
