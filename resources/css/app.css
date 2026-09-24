@@ -1,3 +1,36 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+    .btn {
+        @apply inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+    }
+    .btn-primary {
+        @apply btn bg-indigo-600 text-white hover:bg-indigo-500 focus-visible:ring-indigo-600;
+    }
+    .btn-secondary {
+        @apply btn bg-white text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 focus-visible:ring-indigo-600;
+    }
+    .btn-danger {
+        @apply btn bg-rose-600 text-white hover:bg-rose-500 focus-visible:ring-rose-600;
+    }
+    .card {
+        @apply rounded-xl bg-white shadow-sm ring-1 ring-slate-200;
+    }
+    .form-input {
+        @apply block w-full rounded-md border-slate-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500;
+    }
+    .form-label {
+        @apply block text-sm font-medium text-slate-700;
+    }
+    .table-th {
+        @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+    }
+    .table-td {
+        @apply whitespace-nowrap px-4 py-3 text-sm text-slate-700;
+    }
+    .link {
+        @apply font-medium text-indigo-600 hover:text-indigo-500;
+    }
+}

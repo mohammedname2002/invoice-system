@@ -1,7 +1,8 @@
 import './bootstrap';
+import { Livewire, Alpine } from '../../vendor/livewire/livewire/dist/livewire.esm';
+import invoiceEditor from './invoice-editor';
 
-import Alpine from 'alpinejs';
+// Livewire ships Alpine; register our components on that single instance.
+Alpine.data('invoiceEditor', invoiceEditor);
 
-window.Alpine = Alpine;
-
-Alpine.start();
+Livewire.start();
