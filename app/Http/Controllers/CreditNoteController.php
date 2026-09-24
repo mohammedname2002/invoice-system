@@ -2,86 +2,80 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\StoreCreditNoteRequest;
+use App\Http\Requests\UpdateCreditNoteRequest;
+use App\Models\CreditNote;
 use App\Models\Invoice;
-use App\Http\Requests\CreditNoteRequest;
 use App\Services\CreditNoteService;
-use Illuminate\Support\Facades\Log;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\View\View;
 
 class CreditNoteController extends Controller
 {
-    public function __construct(
-        protected CreditNoteService $creditNoteService,
-    ) {
+    public function __construct(private readonly CreditNoteService $creditNotes) {}
+
+    public function index(): View
+    {
+        return view('credit-notes.index');
     }
 
-    public function index()
+    /**
+     * Step 1: pick an invoice. Step 2 (?invoice=ID): choose what to credit.
+     */
+    public function create(Request $request): View
     {
-        return view('credit-note.index');
+        $invoice = $request->filled('invoice')
+            ? Invoice::with('customer')->find($request->integer('invoice'))
+            : null;
+
+        return view('credit-notes.create', [
+            'invoices' => Invoice::with('customer')->latest('issue_date')->latest('id')->limit(200)->get(),
+            'invoice' => $invoice,
+            'items' => $invoice ? $this->creditNotes->creditableItems($invoice) : collect(),
+        ]);
     }
 
-    public function create()
+    public function store(StoreCreditNoteRequest $request): RedirectResponse
     {
-        $invoices = Invoice::with('company')->orderByDesc('id')->get();
+        $invoice = Invoice::findOrFail($request->integer('invoice_id'));
+        $creditNote = $this->creditNotes->create($invoice, $request->validated());
 
-        return view('credit-note.create', compact('invoices'));
+        return to_route('credit-notes.show', $creditNote)->with('status', "Credit note {$creditNote->number} issued.");
     }
 
-    public function preview(Invoice $invoice)
+    public function show(CreditNote $creditNote): View
     {
-        $payload = $this->creditNoteService->buildInvoicePreview($invoice);
-
-        return response()->json($payload);
+        return view('credit-notes.show', ['creditNote' => $creditNote->load(['invoice.customer', 'items'])]);
     }
 
-    public function store(CreditNoteRequest $request)
+    public function edit(CreditNote $creditNote): View
     {
-        $this->creditNoteService->store($request);
-
-        return redirect()->route('credit-note.index')->with('success', 'Credit note created successfully.');
+        return view('credit-notes.edit', ['creditNote' => $creditNote->load('invoice')]);
     }
 
-    public function show(int $id)
+    public function update(UpdateCreditNoteRequest $request, CreditNote $creditNote): RedirectResponse
     {
-        $creditNote = $this->creditNoteService->find($id);
+        $this->creditNotes->update($creditNote, $request->validated());
 
-        return view('credit-note.show', compact('creditNote'));
+        return to_route('credit-notes.show', $creditNote)->with('status', 'Credit note updated.');
     }
 
-    public function edit(int $id)
+    public function destroy(CreditNote $creditNote): RedirectResponse
     {
-        $creditNote = $this->creditNoteService->find($id);
+        $this->creditNotes->delete($creditNote);
 
-        return view('credit-note.edit', compact('creditNote'));
+        return to_route('credit-notes.index')->with('status', "Credit note {$creditNote->number} deleted and stock reversed.");
     }
 
-    public function update(CreditNoteRequest $request, int $id)
+    public function pdf(CreditNote $creditNote): Response
     {
-        $this->creditNoteService->update($id, $request);
+        $creditNote->load(['invoice.customer', 'items']);
 
-        return redirect()->route('credit-note.index')->with('success', 'Credit note updated successfully.');
-    }
-
-    public function destroy(int $id)
-    {
-        $this->creditNoteService->delete($id);
-
-        return redirect()->back()->with('success', 'Credit note deleted successfully.');
-    }
-
-    public function downloadCreditNote(int $id)
-    {
-        $creditNote = $this->creditNoteService->find($id);
-
-        $html = view('credit-note.download', compact('creditNote'))->render();
-
-        try {
-            $mpdf = new \Mpdf\Mpdf();
-            $mpdf->WriteHTML($html);
-            $mpdf->Output('credit_note_' . $creditNote->id . '.pdf', 'D');
-        } catch (\Mpdf\MpdfException $e) {
-            Log::error('mPDF Credit Note Error: ' . $e->getMessage());
-
-            return response()->json(['error' => 'PDF generation failed.'], 500);
-        }
+        return Pdf::loadView('pdf.credit-note', ['creditNote' => $creditNote])
+            ->setPaper('a4')
+            ->download("{$creditNote->number}.pdf");
     }
 }
