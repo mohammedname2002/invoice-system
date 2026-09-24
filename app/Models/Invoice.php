@@ -2,70 +2,114 @@
 
 namespace App\Models;
 
+use App\Casts\MoneyCast;
+use App\Enums\InvoiceStatus;
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
+/**
+ * @property Carbon $issue_date
+ * @property Carbon $due_date
+ * @property InvoiceStatus $status
+ * @property Money $subtotal
+ * @property Money $discount_total
+ * @property Money $tax_total
+ * @property Money $total
+ * @property Money $amount_credited
+ * @property Money $amount_paid
+ */
 class Invoice extends Model
 {
-    use HasFactory;
-    protected $fillable = ['company_id', 'from','to', 'date_of_create' , 'invoice_number', 'status'];
+    /**
+     * Only descriptive fields are mass assignable. Numbers, totals and the
+     * status are owned by InvoiceService and set explicitly.
+     */
+    protected $fillable = [
+        'customer_id',
+        'issue_date',
+        'due_date',
+        'notes',
+    ];
 
-    public function scopeForCompany(Builder $query, ?int $companyId): Builder
+    protected function casts(): array
     {
-        if ($companyId) {
-            $query->where('company_id', $companyId);
-        }
-
-        return $query;
+        return [
+            'issue_date' => 'date',
+            'due_date' => 'date',
+            'status' => InvoiceStatus::class,
+            'discount_rate' => 'decimal:2',
+            'subtotal' => MoneyCast::class,
+            'discount_total' => MoneyCast::class,
+            'tax_total' => MoneyCast::class,
+            'total' => MoneyCast::class,
+            'amount_credited' => MoneyCast::class,
+            'amount_paid' => MoneyCast::class,
+        ];
     }
 
-    public function scopeForMonthYear(Builder $query, ?int $month, ?int $year): Builder
+    /** @return BelongsTo<Customer, $this> */
+    public function customer(): BelongsTo
     {
-        if (! $year && ! $month) {
-            return $query;
-        }
-
-        if ($year && $month) {
-            $start = Carbon::create($year, $month, 1)->startOfMonth();
-            $end = $start->copy()->endOfMonth();
-
-            return $query->where('from', '<=', $end)->where('to', '>=', $start);
-        }
-
-        if ($year) {
-            return $query->whereYear('from', $year);
-        }
-
-        return $query->whereMonth('from', $month);
+        return $this->belongsTo(Customer::class);
     }
 
-    public function company() :BelongsTo
+    /** @return HasMany<InvoiceItem, $this> */
+    public function items(): HasMany
     {
-        return $this->belongsTo(Company::class);
+        return $this->hasMany(InvoiceItem::class)->orderBy('position');
     }
 
+    /** @return HasMany<CreditNote, $this> */
     public function creditNotes(): HasMany
     {
         return $this->hasMany(CreditNote::class);
     }
 
-    public function calculateTotalWithVat()
+    /** @return HasMany<Payment, $this> */
+    public function payments(): HasMany
     {
-        $totalWithVat = 0;
+        return $this->hasMany(Payment::class);
+    }
 
-        // Assuming you have a relationship to get products linked to the invoice
-        // Fetch products belonging to the company of this invoice
-        $products = Product::where('company_id', $this->company_id)->get();
+    /** Amount still owed: total minus credit notes minus payments. */
+    public function balance(): Money
+    {
+        return $this->total->subtract($this->amount_credited)->subtract($this->amount_paid);
+    }
 
-        foreach ($products as $product) {
-            // Calculate total with VAT for each product
-            $totalWithVat += $product->getTotalPriceWithVat();
-        }
+    /**
+     * Lines can be edited only until money has been applied to the invoice.
+     * After a payment or credit note exists, corrections go through a credit note.
+     */
+    public function isLocked(): bool
+    {
+        return $this->amount_paid->isPositive()
+            || $this->amount_credited->isPositive()
+            || $this->payments()->exists()
+            || $this->creditNotes()->exists();
+    }
 
-        return $totalWithVat;
+    /** @param  Builder<Invoice>  $query */
+    public function scopeForCustomer(Builder $query, ?int $customerId): void
+    {
+        $query->when($customerId, fn (Builder $q) => $q->where('customer_id', $customerId));
+    }
+
+    /** @param  Builder<Invoice>  $query */
+    public function scopeIssuedIn(Builder $query, ?int $month, ?int $year): void
+    {
+        $query
+            ->when($year, fn (Builder $q) => $q->whereYear('issue_date', $year))
+            ->when($month, fn (Builder $q) => $q->whereMonth('issue_date', $month));
+    }
+
+    /** @param  Builder<Invoice>  $query */
+    public function scopeOpen(Builder $query): void
+    {
+        $query->whereIn('status', InvoiceStatus::open());
     }
 }
