@@ -1,6 +1,6 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "mohammedname2002/invoice-system",
+    "name": "mohammed-a-ashqar/invoice-system",
     "type": "project",
     "description": "Invoicing back office built with Laravel 12: customers, product catalog, invoices with line items, credit notes, payment tracking, PDF export and receivable reports.",
     "keywords": ["laravel", "invoicing", "credit-notes", "payments", "livewire"],

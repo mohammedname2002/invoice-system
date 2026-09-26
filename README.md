@@ -1,6 +1,6 @@
 # Invoice System
 
-[![CI](https://github.com/mohammedname2002/invoice-system/actions/workflows/ci.yml/badge.svg)](https://github.com/mohammedname2002/invoice-system/actions/workflows/ci.yml)
+[![CI](https://github.com/mohammed-a-ashqar/invoice-system/actions/workflows/ci.yml/badge.svg)](https://github.com/mohammed-a-ashqar/invoice-system/actions/workflows/ci.yml)
 
 An invoicing back office built with Laravel 12. It covers customers, a product catalogue with stock, invoices with line items, credit notes, payment tracking, PDF documents and receivables reports.
 
@@ -87,7 +87,7 @@ app/
 Requirements: PHP 8.2+ (with `pdo_mysql`, `mbstring` and `dom`), Composer, Node.js 18+, and MySQL 8 or MariaDB 10.4+.
 
 ```bash
-git clone https://github.com/mohammedname2002/invoice-system.git
+git clone https://github.com/mohammed-a-ashqar/invoice-system.git
 cd invoice-system
 
 composer install
